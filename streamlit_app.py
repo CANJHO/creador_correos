@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import hashlib
@@ -60,47 +59,54 @@ def base36_encode(num: int) -> str:
         out.append(chars[r])
     return sign + "".join(reversed(out))
 
-def sufijo_sha1_hex_last_from(codigo_alumno: str = "", dni: str = "", last_n: int = 5) -> str:
-    if codigo_alumno:
-        stable_id = f"ALU:{codigo_alumno}"
-    elif dni:
-        stable_id = f"DNI:{dni}"
-    else:
-        stable_id = "NOID"
-    h = sha1_hex(stable_id)
+# --- Selección del ID estable según ROL ---
+def elegir_id_estable(rol: str, codigo_alumno: str = "", dni: str = "") -> str:
+    # Estudiante: prioriza código; Admin/Docente: prioriza DNI
+    rol = (rol or "").strip()
+    codigo_alumno = (codigo_alumno or "").strip()
+    dni = (dni or "").strip()
+
+    if rol == "Estudiante (E)":
+        if codigo_alumno:
+            return f"ALU:{codigo_alumno}"
+        elif dni:
+            return f"DNI:{dni}"
+    else:  # Administrativo (AD) o Docente (D)
+        if dni:
+            return f"DNI:{dni}"
+        elif codigo_alumno:
+            return f"ALU:{codigo_alumno}"
+
+    return "NOID"
+
+def sufijo_sha1_hex_last(stable_id: str, last_n: int = 5) -> str:
+    h = sha1_hex(stable_id if stable_id else "NOID")
     return h[-last_n:]
 
-def sufijo_sha1_base36_last_from(codigo_alumno: str = "", dni: str = "", last_n: int = 5) -> str:
-    if codigo_alumno:
-        stable_id = f"ALU:{codigo_alumno}"
-    elif dni:
-        stable_id = f"DNI:{dni}"
-    else:
-        stable_id = "NOID"
-    h = sha1_hex(stable_id)
+def sufijo_sha1_base36_last(stable_id: str, last_n: int = 5) -> str:
+    h = sha1_hex(stable_id if stable_id else "NOID")
     val = int(h, 16)
     b36 = base36_encode(val)
     return b36[-last_n:]
 
-def construir_email_localpart(formato: str, nombres: str, ap_paterno: str, codigo_alumno: str, dni: str) -> str:
+def construir_email_localpart(formato: str, rol: str, nombres: str, ap_paterno: str, codigo_alumno: str, dni: str) -> str:
+    # formatos: 'legible_hex', 'legible_b36', 'nombre_apellido_b36'
+    stable_id = elegir_id_estable(rol, codigo_alumno, dni)
+
     if formato == "legible_hex":
         slug = slug_inicial_apellido(nombres, ap_paterno, max_len=15)
-        suf = sufijo_sha1_hex_last_from(codigo_alumno, dni, last_n=5)
-        return f"{slug}.{suf}"  # ← CAMBIO AQUÍ
+        suf = sufijo_sha1_hex_last(stable_id, last_n=5)
+        return f"{slug}.{suf}"
     elif formato == "legible_b36":
         slug = slug_inicial_apellido(nombres, ap_paterno, max_len=15)
-        suf = sufijo_sha1_base36_last_from(codigo_alumno, dni, last_n=5)
-        return f"{slug}.{suf}"  # ← CAMBIO AQUÍ
+        suf = sufijo_sha1_base36_last(stable_id, last_n=5)
+        return f"{slug}.{suf}"
     elif formato == "nombre_apellido_b36":
         slug = slug_nombre_apellido(nombres, ap_paterno, max_len=30)
-        suf = sufijo_sha1_base36_last_from(codigo_alumno, dni, last_n=5)
-        return f"{slug}.{suf}"  # ← CAMBIO AQUÍ
+        suf = sufijo_sha1_base36_last(stable_id, last_n=5)
+        return f"{slug}.{suf}"
     else:
         return "invalid"
-
-
-
-
 
 def aplicar_rol_suffix(localpart: str, rol: str) -> str:
     suf = {"Estudiante (E)": "E", "Administrativo (AD)": "AD", "Docente (D)": "D"}.get(rol, "")
@@ -108,7 +114,7 @@ def aplicar_rol_suffix(localpart: str, rol: str) -> str:
 
 # ------------------ UI ------------------
 st.title("📧 Generador de Correos Institucionales")
-st.caption("Universidad Autónoma de Ica — formatos con sufijo determinístico + marca de rol (E, AD, D)")
+st.caption("Universidad Autónoma de Ica — sufijo determinístico + marca de rol (E, AD, D).")
 
 with st.expander("ℹ️ Instrucciones rápidas", expanded=True):
     st.markdown("""
@@ -121,6 +127,11 @@ with st.expander("ℹ️ Instrucciones rápidas", expanded=True):
 
 domain = st.text_input("Dominio", value=DOMAIN_DEFAULT, help="Dominio para el correo institucional")
 rol = st.selectbox("Tipo de usuario para este lote", ["Estudiante (E)", "Administrativo (AD)", "Docente (D)"])
+if rol == "Estudiante (E)":
+    st.info("Para **Estudiante (E)**, se usa **Código de Alumno** (si falta, se usa DNI).")
+else:
+    st.info("Para **Administrativo (AD)** o **Docente (D)**, se usa **DNI** (si falta, se usa Código de Alumno).")
+
 modo = st.radio("Modo de salida", ["Mostrar los 3 formatos (presentación)", "Solo 1 formato"])
 
 formato_unico = None
@@ -137,14 +148,14 @@ if modo == "Solo 1 formato":
 st.divider()
 
 st.subheader("📥 Subida de archivo")
-st.write("Sube un **Excel (.xlsx)** o **CSV** con estas columnas: `Nombres`, `ApellidoPaterno`, `ApellidoMaterno` (opcional), `CodigoAlumno` (prioritario), `DNI` (opcional).")
+st.write("Sube un **Excel (.xlsx)** o **CSV** con columnas: `Nombres`, `ApellidoPaterno`, `ApellidoMaterno` (opcional), `CodigoAlumno`, `DNI`.")
 
-from io import BytesIO
+# Plantilla descargable
 template_df = pd.DataFrame([
     {"Nombres":"Jhony Freddy", "ApellidoPaterno":"Canchari", "ApellidoMaterno":"Barrios", "CodigoAlumno":"A191000173", "DNI":"44823948"}
 ])
 bio_template = BytesIO()
-with pd.ExcelWriter(bio_template, engine="xlsxwriter") as writer:
+with pd.ExcelWriter(bio_template, engine="openpyxl") as writer:
     template_df.to_excel(writer, index=False, sheet_name="Plantilla")
 bio_template.seek(0)
 st.download_button("⬇️ Descargar plantilla (Excel)", data=bio_template, file_name="plantilla_correos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -169,57 +180,79 @@ def leer_archivo(uploaded_file) -> pd.DataFrame | None:
 
 df = leer_archivo(uploaded)
 
+def validar_fila_por_rol(row, rol: str) -> str | None:
+    codigo = str(row.get("CodigoAlumno", "") or "").strip()
+    dni = str(row.get("DNI", "") or "").strip()
+    if rol == "Estudiante (E)":
+        if not codigo and not dni:
+            return "Falta Código de Alumno y DNI."
+    else:
+        if not dni and not codigo:
+            return "Falta DNI y Código de Alumno."
+    return None
+
 if df is not None:
-    expected_cols = {"Nombres", "ApellidoPaterno", "CodigoAlumno"}
+    expected_cols = {"Nombres", "ApellidoPaterno", "CodigoAlumno", "DNI"}
     missing = expected_cols - set(df.columns)
     if missing:
-        st.error(f"Faltan columnas obligatorias: {', '.join(sorted(missing))}")
+        st.error(f"Faltan columnas: {', '.join(sorted(missing))}")
     else:
-        st.success(f"Archivo cargado. Filas: {len(df)}")
-        out = df.copy()
+        # Validación por rol
+        errores = []
+        for idx, row in df.iterrows():
+            msg = validar_fila_por_rol(row, rol)
+            if msg:
+                errores.append(f"Fila {idx+1}: {msg}")
 
-        def gen_legible_hex(row):
-            local = construir_email_localpart("legible_hex", row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
-            return aplicar_rol_suffix(local, rol) + "@" + domain
-
-        def gen_legible_b36(row):
-            local = construir_email_localpart("legible_b36", row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
-            return aplicar_rol_suffix(local, rol) + "@" + domain
-
-        def gen_nombre_apellido_b36(row):
-            local = construir_email_localpart("nombre_apellido_b36", row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
-            return aplicar_rol_suffix(local, rol) + "@" + domain
-
-        if modo == "Mostrar los 3 formatos (presentación)":
-            out["Correo_legible_hex"] = df.apply(gen_legible_hex, axis=1)
-            out["Correo_legible_base36"] = df.apply(gen_legible_b36, axis=1)
-            out["Correo_nombre_apellido_base36"] = df.apply(gen_nombre_apellido_b36, axis=1)
-            vista_cols = ["Nombres","ApellidoPaterno","ApellidoMaterno","CodigoAlumno","DNI","Correo_legible_hex","Correo_legible_base36","Correo_nombre_apellido_base36"]
+        if errores:
+            st.error("No se puede continuar. Corrige estas filas:\n- " + "\n- ".join(errores))
         else:
-            if formato_unico == "Formato legible + sufijo (SHA1 hex last 5)":
-                out["Correo"] = df.apply(gen_legible_hex, axis=1)
-            elif formato_unico == "Formato legible + sufijo base36 (last 5)":
-                out["Correo"] = df.apply(gen_legible_b36, axis=1)
+            st.success(f"Archivo cargado. Filas: {len(df)}")
+            out = df.copy()
+
+            def gen_legible_hex(row):
+                local = construir_email_localpart("legible_hex", rol, row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
+                return aplicar_rol_suffix(local, rol) + "@" + domain
+
+            def gen_legible_b36(row):
+                local = construir_email_localpart("legible_b36", rol, row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
+                return aplicar_rol_suffix(local, rol) + "@" + domain
+
+            def gen_nombre_apellido_b36(row):
+                local = construir_email_localpart("nombre_apellido_b36", rol, row.get("Nombres",""), row.get("ApellidoPaterno",""), str(row.get("CodigoAlumno","")), str(row.get("DNI","")))
+                return aplicar_rol_suffix(local, rol) + "@" + domain
+
+            if modo == "Mostrar los 3 formatos (presentación)":
+                out["Correo_legible_hex"] = df.apply(gen_legible_hex, axis=1)
+                out["Correo_legible_base36"] = df.apply(gen_legible_b36, axis=1)
+                out["Correo_nombre_apellido_base36"] = df.apply(gen_nombre_apellido_b36, axis=1)
+                vista_cols = ["Nombres","ApellidoPaterno","ApellidoMaterno","CodigoAlumno","DNI","Correo_legible_hex","Correo_legible_base36","Correo_nombre_apellido_base36"]
             else:
-                out["Correo"] = df.apply(gen_nombre_apellido_b36, axis=1)
-            vista_cols = ["Nombres","ApellidoPaterno","ApellidoMaterno","CodigoAlumno","DNI","Correo"]
+                if formato_unico == "Formato legible + sufijo (SHA1 hex last 5)":
+                    out["Correo"] = df.apply(gen_legible_hex, axis=1)
+                elif formato_unico == "Formato legible + sufijo base36 (last 5)":
+                    out["Correo"] = df.apply(gen_legible_b36, axis=1)
+                else:
+                    out["Correo"] = df.apply(gen_nombre_apellido_b36, axis=1)
+                vista_cols = ["Nombres","ApellidoPaterno","ApellidoMaterno","CodigoAlumno","DNI","Correo"]
 
-        st.subheader("👀 Vista previa")
-        st.dataframe(out[vista_cols].head(50), use_container_width=True)
+            st.subheader("👀 Vista previa")
+            st.dataframe(out[vista_cols].head(50), use_container_width=True)
 
-        csv_data = out[vista_cols].to_csv(index=False).encode("utf-8")
-        st.download_button("💾 Descargar CSV", data=csv_data, file_name="correos_generados.csv", mime="text/csv")
+            csv_data = out[vista_cols].to_csv(index=False).encode("utf-8")
+            st.download_button("💾 Descargar CSV", data=csv_data, file_name="correos_generados.csv", mime="text/csv")
 
-        xls_buf = BytesIO()
-        with pd.ExcelWriter(xls_buf, engine="xlsxwriter") as writer:
-            out[vista_cols].to_excel(writer, index=False, sheet_name="Correos")
-        xls_buf.seek(0)
-        st.download_button("💾 Descargar Excel (.xlsx)", data=xls_buf, file_name="correos_generados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            xls_buf = BytesIO()
+            with pd.ExcelWriter(xls_buf, engine="openpyxl") as writer:
+                out[vista_cols].to_excel(writer, index=False, sheet_name="Correos")
+            xls_buf.seek(0)
+            st.download_button("💾 Descargar Excel (.xlsx)", data=xls_buf, file_name="correos_generados.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
 st.sidebar.markdown("### Acerca de")
-st.sidebar.write("Genera correos únicos con sufijo determinístico en base a Código de Alumno/DNI y añade marca de rol (E, AD, D).")
-st.sidebar.write("Formatos soportados:")
-st.sidebar.write("- Inicial+Apellido + sufijo SHA1 hex last 5")
-st.sidebar.write("- Inicial+Apellido + sufijo SHA1 base36 last 5")
-st.sidebar.write("- Nombre.Apellido + sufijo SHA1 base36 last 5")
+st.sidebar.write("Genera correos únicos con sufijo determinístico según rol.")
+st.sidebar.write("Prioridad de ID: Estudiante → Código; AD/Docente → DNI.")
+st.sidebar.write("Formatos:")
+st.sidebar.write("- Inicial+Apellido + sufijo (SHA1 hex last 5)")
+st.sidebar.write("- Inicial+Apellido + sufijo (SHA1 base36 last 5)")
+st.sidebar.write("- Nombre.Apellido + sufijo (SHA1 base36 last 5)")
 st.sidebar.caption("© 2025 — Chat Gpt ++ NW")
