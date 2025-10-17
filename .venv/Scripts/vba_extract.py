@@ -1,4 +1,4 @@
-#!C:\Users\Freddy\Desktop\generador_correos\.venv\Scripts\python.exe
+#!C:\Users\Administrador\OneDrive - UNIVERSIDAD AUTONOMA DE ICA\Escritorio\creador_correos\.venv\Scripts\python.exe
 
 ##############################################################################
 #

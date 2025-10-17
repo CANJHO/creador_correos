@@ -8,7 +8,7 @@ if defined _OLD_CODEPAGE (
     "%SystemRoot%\System32\chcp.com" 65001 > nul
 )
 
-set VIRTUAL_ENV=C:\Users\Freddy\Desktop\generador_correos\.venv
+set VIRTUAL_ENV=C:\Users\Administrador\OneDrive - UNIVERSIDAD AUTONOMA DE ICA\Escritorio\creador_correos\.venv
 
 if not defined PROMPT set PROMPT=$P$G
 
